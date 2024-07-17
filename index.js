@@ -102,6 +102,9 @@ client.on('messageCreate', async (message) => {
                 if (fileSizeInBytes > 3145728) {
                   // File size exceeds limit, handle accordingly
                   message.reply('The provided image is too large. Please provide an image smaller than 4M');
+                  fs.unlink(localPath, (err) => {
+                    if (err) console.error(err);
+                  });
                 } else {
                   // File size is within limit, proceed with runGeminiVision
                   try {
@@ -123,6 +126,11 @@ client.on('messageCreate', async (message) => {
                   } catch (error) {
                     console.error(error);
                     message.reply('there was an error trying to execute that command!');
+                  } finally {
+                    // Delete the file after processing
+                    fs.unlink(localPath, (err) => {
+                      if (err) console.error(err);
+                    });
                   }
                 }
               });
