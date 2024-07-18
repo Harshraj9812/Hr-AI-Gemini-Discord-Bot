@@ -38,11 +38,13 @@ client.on('messageCreate', async (message) => {
   try {
     if (message.author.bot) return;
 
-    // Start typing indicator
-    await message.channel.sendTyping();
+    // // Start typing indicator
+    // await message.channel.sendTyping();
 
     // Direct Message Response
     if (message.channel.type === ChannelType.DM && authorizedUsers.includes(message.author.id)) {
+      // Start typing indicator
+      await message.channel.sendTyping();
       const prompt = message.content;
       try {
         const response = await runGeminiPro(prompt, currentKeyIndex);
@@ -69,7 +71,8 @@ client.on('messageCreate', async (message) => {
     // Channel Response
     if (message.channel.type === ChannelType.GuildText) {
       if (!message.mentions.users.has(client.user.id)) return;
-
+      // Start typing indicator
+      await message.channel.sendTyping();
       const userId = message.author.id;
       const prompt = message.content;
       let localPath = null;
