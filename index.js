@@ -82,8 +82,10 @@ client.on('messageCreate', async (message) => {
           let filename = attachment.name; // get the filename
 
           // Check if the MIME type is supported
-          const supportedMimeTypes = ['rspng', 'image/jpeg', 'image/webp', 'image/heic', 'image/heif'];
+          const supportedMimeTypes = ['image/png', 'image/jpeg', 'image/webp', 'image/heic', 'image/heif'];
           if (!supportedMimeTypes.includes(mimeType)) {
+            // Get the Image Extension
+            console.log("File Type inputed -",mimeType)
             message.reply('Unsupported image format. Supported formats are PNG, JPEG, WEBP, HEIC, and HEIF.');
             return;
           }
@@ -115,7 +117,8 @@ client.on('messageCreate', async (message) => {
                 } else {
                   // File size is within limit, proceed with runGeminiVision
                   try {
-                    console.log(mimeType)
+                    // Get the Image Extension
+                    // console.log(mimeType)
                     const result = await runGeminiVision(prompt, localPath, mimeType, currentKeyIndex);
                     apiCallCount++;
                     // If the API call count reaches 60, switch to the next key
