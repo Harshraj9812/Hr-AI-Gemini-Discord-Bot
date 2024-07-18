@@ -1,0 +1,11 @@
+version: '3'
+
+services:
+  Hr-AI-Gemini-Discord-Bot:
+    image: harshraj9812/hr-ai-gemini-discord-bot:latest
+    restart: unless-stopped
+    environment:
+      - DISCORD_TOKEN=
+      - GEMINI_API_KEYS=
+      - AUTHORIZED_USERS=
+      - AUTHORIZED_CHANNELS=
