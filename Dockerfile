@@ -15,4 +15,4 @@ RUN pwd
 RUN ls
 
 # Define the command to run your application
-CMD ["npm", "start"]
+CMD ["node", "index.js"]
