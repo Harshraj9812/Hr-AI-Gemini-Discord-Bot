@@ -1,0 +1,31 @@
+name: Docker Build & Push
+
+on:
+  push:
+    branches:
+      - main
+
+
+jobs:
+  Build-Push-Docker-Image:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+            
+      - name: Building Docker Image
+        run: |
+          pwd
+          ls -lrt
+          docker build -t ${{ secrets.DOCKER_USERNAME }}/hr-ai-gemini-discord-bot .
+
+      - name: Log in to Docker Hub
+        env:
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+        run: |
+          echo $DOCKER_PASSWORD | docker login -u $DOCKER_USERNAME --password-stdin
+
+      - name: Pushing Docker Image to Docker Hub
+        run: docker push ${{ secrets.DOCKER_USERNAME }}/hr-ai-gemini-discord-bot
