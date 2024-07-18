@@ -28,8 +28,10 @@ client.on('ready', () => {
   console.log(`Logged in as ${client.user.tag}!`);
 });
 
-const authorizedUsers = process.env.AUTHORIZED_USERS.split(',');
-const authorizedChannels = process.env.AUTHORIZED_CHANNELS.split(',');
+// Getting Authorize User from .ENV
+const allowedRole = process.env.ROLE
+// const authorizedUsers = process.env.AUTHORIZED_USERS.split(',');
+// const authorizedChannels = process.env.AUTHORIZED_CHANNELS.split(',');
 
 client.on('messageCreate', async (message) => {
   try {
@@ -39,7 +41,9 @@ client.on('messageCreate', async (message) => {
     await message.channel.sendTyping();
 
     // Direct Message Response
-    if (message.channel.type === ChannelType.DM && authorizedUsers.includes(message.author.id)) {
+
+    // if (message.channel.type === ChannelType.DM && authorizedUsers.includes(message.author.id)) {
+    if (interaction.member.roles.cache.some(role => role.name === `${allowedRole}`)) {
       // generate response from gemini api
       const prompt = message.content;
       try {
@@ -64,9 +68,13 @@ client.on('messageCreate', async (message) => {
         message.reply('there was an error trying to execute that command!');
       }
     }
+   else {
+      message.reply("You don't have Access for this Command");
+  }
 
     // Channel Response
-    if (message.channel.type === ChannelType.GuildText && authorizedChannels.includes(message.channel.id)) {
+    // if (message.channel.type === ChannelType.GuildText && authorizedChannels.includes(message.channel.id)) {
+    if (interaction.member.roles.cache.some(role => role.name === `${allowedRole}`)) {
       if (!message.mentions.users.has(client.user.id)) return;
       else {
         const userId = message.author.id;
@@ -173,7 +181,8 @@ client.on('messageCreate', async (message) => {
     }
   } catch (error) {
     console.error(error);
-    message.reply('there was an error trying to execute that command!');
+    // message.reply('there was an error trying to execute that command!');
+    message.reply("You don't have Access for this Command");
   }
 });
 

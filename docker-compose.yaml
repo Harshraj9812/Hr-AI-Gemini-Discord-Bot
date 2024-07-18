@@ -7,5 +7,6 @@ services:
     environment:
       - DISCORD_TOKEN=
       - GEMINI_API_KEYS=
-      - AUTHORIZED_USERS=
-      - AUTHORIZED_CHANNELS=
+      - ROLE=
+      # - AUTHORIZED_USERS=
+      # - AUTHORIZED_CHANNELS=
