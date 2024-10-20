@@ -12,13 +12,12 @@ jobs:
 
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v3
-            
-      - name: Building Docker Image
-        run: |
-          pwd
-          ls -lrt
-          docker build -t ${{ secrets.DOCKER_USERNAME }}/hr-ai-gemini-discord-bot .
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+        with:
+          driver-opts: image=moby/buildkit:latest
 
       - name: Log in to Docker Hub
         env:
@@ -27,5 +26,10 @@ jobs:
         run: |
           echo $DOCKER_PASSWORD | docker login -u $DOCKER_USERNAME --password-stdin
 
-      - name: Pushing Docker Image to Docker Hub
-        run: docker push ${{ secrets.DOCKER_USERNAME }}/hr-ai-gemini-discord-bot
+      - name: Build and Push Multi-Architecture Docker Image
+        run: |
+          docker buildx create --use
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
+            -t ${{ secrets.DOCKER_USERNAME }}/hr-ai-gemini-discord-bot:latest \
+            --push .

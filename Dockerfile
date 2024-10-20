@@ -1,5 +1,5 @@
 # Use an official Node.js LTS runtime as a base image
-FROM node:alpine
+FROM node:23-alpine
 
 # Copy the application code to the working directory
 COPY . .
