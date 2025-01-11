@@ -34,6 +34,28 @@ const allowedRole = process.env.ROLE
 const authorizedUsers = process.env.AUTHORIZED_USERS.split(',');
 // const authorizedChannels = process.env.AUTHORIZED_CHANNELS.split(',');
 
+// Message history storage - key: channelId+userId, value: array of messages
+const messageHistory = new Map();
+const MAX_HISTORY = 10; // Maximum number of messages to remember per user/channel
+
+// Helper function to manage conversation history
+function updateMessageHistory(userId, channelId, role, content) {
+  const key = `${channelId}-${userId}`;
+  if (!messageHistory.has(key)) {
+    messageHistory.set(key, []);
+  }
+  
+  const history = messageHistory.get(key);
+  history.push({ role, content });
+  
+  // Keep only last MAX_HISTORY messages
+  if (history.length > MAX_HISTORY) {
+    history.shift();
+  }
+  
+  return history;
+}
+
 client.on('messageCreate', async (message) => {
   try {
     if (message.author.bot) return;
@@ -47,7 +69,17 @@ client.on('messageCreate', async (message) => {
       await message.channel.sendTyping();
       const prompt = message.content;
       try {
-        const response = await runGeminiPro(prompt, currentKeyIndex);
+        // Get conversation history
+        const history = updateMessageHistory(message.author.id, message.channel.id, "user", prompt);
+        
+        // Construct prompt with history
+        const fullPrompt = history.map(msg => `${msg.role}: ${msg.content}`).join('\n') + '\nAssistant:';
+        
+        const response = await runGeminiPro(fullPrompt, currentKeyIndex);
+        
+        // Store bot's response in history
+        updateMessageHistory(message.author.id, message.channel.id, "assistant", response);
+        
         apiCallCount++;
         // If the API call count reaches 60, switch to the next key
         if (apiCallCount >= 60) {
@@ -78,6 +110,12 @@ client.on('messageCreate', async (message) => {
       let localPath = null;
       let mimeType = null;
 
+      // Get conversation history
+      const history = updateMessageHistory(message.author.id, message.channel.id, "user", prompt);
+      
+      // Construct prompt with history
+      const fullPrompt = history.map(msg => `${msg.role}: ${msg.content}`).join('\n') + '\nAssistant:';
+
       // Check if the user has the allowed role
       if (message.member) {
         const roles = message.member.roles.cache.map(role => role.name);
@@ -101,7 +139,7 @@ client.on('messageCreate', async (message) => {
         mimeType = attachment.contentType;
         let filename = attachment.name;
 
-        const supportedMimeTypes = ['image/png', 'image/jpeg', 'image/webp', 'image/heic', 'image/heif'];
+        const supportedMimeTypes = ['image/png', 'image/jpeg', 'image/webp', 'image.heic', 'image.heif'];
         if (!supportedMimeTypes.includes(mimeType)) {
           console.log("Unsupported File Type: ", mimeType);
           message.reply('Unsupported image format. Supported formats are PNG, JPEG, WEBP, HEIC, and HEIF.');
@@ -137,7 +175,7 @@ client.on('messageCreate', async (message) => {
                 try {
                     // Get the Image Extension
                     // console.log(mimeType)
-                  const result = await runGeminiVision(prompt, localPath, mimeType, currentKeyIndex);
+                  const result = await runGeminiVision(fullPrompt, localPath, mimeType, currentKeyIndex);
                   apiCallCount++;
                     // If the API call count reaches 60, switch to the next key
                   if (apiCallCount >= 60) {
@@ -167,7 +205,7 @@ client.on('messageCreate', async (message) => {
         });
       } else {
         try {
-          const result = await runGeminiPro(prompt, currentKeyIndex);
+          const result = await runGeminiPro(fullPrompt, currentKeyIndex);
           apiCallCount++;
             // If the API call count reaches 60, switch to the next key
           if (apiCallCount >= 60) {
