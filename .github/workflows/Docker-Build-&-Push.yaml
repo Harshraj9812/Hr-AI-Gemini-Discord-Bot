@@ -34,9 +34,7 @@ jobs:
             -t ${{ secrets.DOCKER_USERNAME }}/hr-ai-gemini-discord-bot:v1.${{ github.run_number }} \
             --push .
 
-      - name: Create GitHub Tag
-        env:
-          GITHUB_TOKEN: ${{ secrets.GIT_TOKEN }}
+      - name: Tagging Github Commit as per Docker Image Tag.
         run: |
           git tag v1.${{ github.run_number }}
           git push origin v1.${{ github.run_number }}
