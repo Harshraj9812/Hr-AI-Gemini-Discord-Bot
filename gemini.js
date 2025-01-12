@@ -40,7 +40,6 @@ async function runGeminiPro(prompt, index) {
   return response.text();
 }
 
-//for text and image input, use the gemini-pro-vision model
 // Converts local file information to a GoogleGenerativeAI.Part object.
 function fileToGenerativePart(path, mimeType) {
   return {
@@ -51,19 +50,21 @@ function fileToGenerativePart(path, mimeType) {
   };
 }
 
-async function runGeminiVision(prompt,path,mimeType,index) {
-  // Access your API key as an environment variable (see "Set up your API key" above)
+// For text and image input, use the gemini-pro-vision model
+async function runGeminiVision(prompt, imageData, mimeType, index) {
   const genAI = new GoogleGenerativeAI(geminiApiKeys[index]);
-  // For text-and-image input (multimodal), use the gemini-pro-vision model
-  const model = genAI.getGenerativeModel({ model: "gemini-pro-vision" });
-  const imageParts = [
-    fileToGenerativePart(path, mimeType),
-  ];
-  const result = await model.generateContent([prompt, ...imageParts]);
+  const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
+
+  const imagePart = {
+    inlineData: {
+      data: imageData.toString('base64'),
+      mimeType: mimeType
+    }
+  };
+
+  const result = await model.generateContent([prompt, imagePart]);
   const response = await result.response;
-  const text = response.text();
-  // console.log(text);
-  return text;
+  return response.text();
 }
 
-module.exports = { runGeminiPro, runGeminiVision, geminiApiKeys}
+module.exports = { runGeminiPro, runGeminiVision };

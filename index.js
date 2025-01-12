@@ -15,6 +15,7 @@ const fs = require("fs");
 const path = require('path');
 const https = require('https');
 const { runGeminiPro, runGeminiVision, geminiApiKeys } = require('./gemini.js');
+const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
 
 // API key rotation counters
 let apiCallCount = 0;     // Tracks total API calls for load balancing
@@ -127,6 +128,23 @@ function hasPermission(message) {
 }
 
 /**
+ * Handles image messages by downloading the image, processing it with Gemini Vision, and cleaning up.
+ * @param {object} message - Discord message object
+ * @returns {object|null} - Image data and mime type or null if no image found
+ */
+async function handleImage(message) {
+  const attachment = message.attachments.first();
+  if (!attachment) return null;
+
+  const response = await fetch(attachment.url);
+  const imageBuffer = await response.arrayBuffer();
+  return {
+    buffer: Buffer.from(imageBuffer),
+    mimeType: attachment.contentType || 'image/jpeg'
+  };
+}
+
+/**
  * Main message event handler
  * Processes: 
  * - History commands
@@ -142,13 +160,43 @@ client.on('messageCreate', async (message) => {
     // For DM channels - only allow authorized users
     if (message.channel.type === ChannelType.DM) {
       if (!authorizedUsers.includes(message.author.id)) {
-        // console.log(`Unauthorized DM from user: ${message.author.id}`);
         await message.reply("⚠️ You are not authorized to use this bot in DMs.");
         return;
       }
+
+      try {
+        // Check for image
+        if (message.attachments.size > 0) {
+          const imageData = await handleImage(message);
+          if (imageData) {
+            const prompt = message.content || "What's in this image?";
+            const response = await runGeminiVision(prompt, imageData.buffer, imageData.mimeType, currentKeyIndex);
+            await message.reply(response);
+            return;
+          }
+        }
+        // ...existing text handling...
+        const history = updateMessageHistory(message.author.id, message.channel.id, 'user', message.content);
+        const promptWithHistory = {
+          history: history,
+          current: message.content
+        };
+
+        const response = await runGeminiPro(promptWithHistory, currentKeyIndex);
+        updateMessageHistory(message.author.id, message.channel.id, 'assistant', response);
+        
+        const chunks = splitResponse(response);
+        for (const chunk of chunks) {
+          await message.reply(chunk);
+          await new Promise(resolve => setTimeout(resolve, 500)); // Brief pause between chunks
+        }
+      } catch (error) {
+        console.error(error);
+        await message.reply('Error processing your request.');
+      }
     }
 
-    // For Guild channels - check mentions, roles and channel permissions
+    // For Guild Text channels
     if (message.channel.type === ChannelType.GuildText) {
       // Only respond to mentions
       if (!message.mentions.users.has(client.user.id)) return;
@@ -157,7 +205,6 @@ client.on('messageCreate', async (message) => {
       if (process.env.AUTHORIZED_CHANNELS) {
         const authorizedChannels = process.env.AUTHORIZED_CHANNELS.split(',');
         if (!authorizedChannels.includes(message.channel.id)) {
-          // console.log(`Unauthorized channel: ${message.channel.id}`);
           await message.reply("⚠️ Bot is not authorized in this channel.");
           return;
         }
@@ -170,77 +217,29 @@ client.on('messageCreate', async (message) => {
         );
         
         if (!hasRole) {
-          // console.log(`User ${message.author.id} missing required role`);
           await message.reply(`⚠️ You need the ${process.env.ROLE} role to use this bot.`);
           return;
         }
       }
-    }
 
-    // Continue with existing message processing
-    if (message.content.toLowerCase() === '!history') {
-      const key = `${message.channel.id}-${message.author.id}`;
-      const history = messageHistory.get(key) || [];
-      
-      if (history.length === 0) {
-        await message.reply('No message history found.');
-        return;
-      }
-
-      const formattedHistory = history.map((msg, index) => 
-        `${index + 1}. ${msg.role}: ${msg.parts.substring(0, 100)}${msg.parts.length > 100 ? '...' : ''}`
-      ).join('\n');
-
-      await message.reply(`**Last ${history.length} messages:**\n${formattedHistory}`);
-      return;
-    }
-
-    // Inside messageCreate event handler
-    if (message.channel.type === ChannelType.DM && authorizedUsers.includes(message.author.id)) {
-      let typingInterval;
       try {
-        // Start continuous typing animation
-        typingInterval = setInterval(() => {
-          message.channel.sendTyping();
-        }, 5000); // Discord typing lasts ~10s, refresh every 5s
-
-        const history = updateMessageHistory(message.author.id, message.channel.id, 'user', message.content);
+        // Check for image
+        const prompt = message.content.replace(`<@${client.user.id}>`, '').trim();
+        if (message.attachments.size > 0) {
+          const imageData = await handleImage(message);
+          if (imageData) {
+            const response = await runGeminiVision(prompt, imageData.buffer, imageData.mimeType, currentKeyIndex);
+            await message.reply(response);
+            return;
+          }
+        }
+        // ...existing text handling...
+        const history = updateMessageHistory(message.author.id, message.channel.id, "user", prompt);
         const promptWithHistory = {
           history: history,
-          current: message.content
+          current: prompt
         };
 
-        const response = await runGeminiPro(promptWithHistory, currentKeyIndex);
-        updateMessageHistory(message.author.id, message.channel.id, 'assistant', response);
-        
-        // Clear typing interval
-        clearInterval(typingInterval);
-        
-        const chunks = splitResponse(response);
-        for (const chunk of chunks) {
-          await message.reply(chunk);
-          await new Promise(resolve => setTimeout(resolve, 500)); // Brief pause between chunks
-        }
-      } catch (error) {
-        clearInterval(typingInterval);
-        console.error(error);
-        await message.reply('Error processing your request.');
-      }
-    }
-
-    // For Guild Text channels
-    if (message.channel.type === ChannelType.GuildText) {
-      if (!message.mentions.users.has(client.user.id)) return;
-      
-      const prompt = message.content.replace(`<@${client.user.id}>`, '').trim();
-      const history = updateMessageHistory(message.author.id, message.channel.id, "user", prompt);
-      const promptWithHistory = {
-        history: history,
-        current: prompt
-      };
-
-      try {
-        await message.channel.sendTyping();
         const result = await runGeminiPro(promptWithHistory, currentKeyIndex);
         updateMessageHistory(message.author.id, message.channel.id, "assistant", result);
         
