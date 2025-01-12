@@ -142,7 +142,7 @@ client.on('messageCreate', async (message) => {
     // For DM channels - only allow authorized users
     if (message.channel.type === ChannelType.DM) {
       if (!authorizedUsers.includes(message.author.id)) {
-        console.log(`Unauthorized DM from user: ${message.author.id}`);
+        // console.log(`Unauthorized DM from user: ${message.author.id}`);
         await message.reply("⚠️ You are not authorized to use this bot in DMs.");
         return;
       }
@@ -157,7 +157,7 @@ client.on('messageCreate', async (message) => {
       if (process.env.AUTHORIZED_CHANNELS) {
         const authorizedChannels = process.env.AUTHORIZED_CHANNELS.split(',');
         if (!authorizedChannels.includes(message.channel.id)) {
-          console.log(`Unauthorized channel: ${message.channel.id}`);
+          // console.log(`Unauthorized channel: ${message.channel.id}`);
           await message.reply("⚠️ Bot is not authorized in this channel.");
           return;
         }
@@ -170,7 +170,7 @@ client.on('messageCreate', async (message) => {
         );
         
         if (!hasRole) {
-          console.log(`User ${message.author.id} missing required role`);
+          // console.log(`User ${message.author.id} missing required role`);
           await message.reply(`⚠️ You need the ${process.env.ROLE} role to use this bot.`);
           return;
         }
