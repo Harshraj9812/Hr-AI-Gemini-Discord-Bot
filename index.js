@@ -76,24 +76,34 @@ client.on('messageCreate', async (message) => {
       return;
     }
 
+    // Inside messageCreate event handler
     if (message.channel.type === ChannelType.DM && authorizedUsers.includes(message.author.id)) {
-      await message.channel.sendTyping();
-      
       const history = updateMessageHistory(message.author.id, message.channel.id, 'user', message.content);
       const promptWithHistory = {
         history: history,
         current: message.content
       };
 
-      const response = await runGeminiPro(promptWithHistory, currentKeyIndex);
-      updateMessageHistory(message.author.id, message.channel.id, 'assistant', response);
-      
-      await message.reply(response);
+      try {
+        const response = await runGeminiPro(promptWithHistory, currentKeyIndex);
+        updateMessageHistory(message.author.id, message.channel.id, 'assistant', response);
+        
+        // Split response and send chunks with typing indicators
+        const chunks = splitResponse(response);
+        for (const chunk of chunks) {
+          await message.channel.sendTyping();
+          await new Promise(resolve => setTimeout(resolve, 1000)); // Small delay
+          await message.reply(chunk);
+        }
+      } catch (error) {
+        console.error(error);
+        await message.reply('Error processing your request.');
+      }
     }
 
+    // For Guild Text channels
     if (message.channel.type === ChannelType.GuildText) {
       if (!message.mentions.users.has(client.user.id)) return;
-      await message.channel.sendTyping();
       
       const prompt = message.content.replace(`<@${client.user.id}>`, '').trim();
       const history = updateMessageHistory(message.author.id, message.channel.id, "user", prompt);
@@ -103,16 +113,19 @@ client.on('messageCreate', async (message) => {
       };
 
       try {
+        await message.channel.sendTyping();
         const result = await runGeminiPro(promptWithHistory, currentKeyIndex);
         updateMessageHistory(message.author.id, message.channel.id, "assistant", result);
         
-        const responseChunks = splitResponse(result);
-        for (const chunk of responseChunks) {
+        const chunks = splitResponse(result);
+        for (const chunk of chunks) {
+          await message.channel.sendTyping();
+          await new Promise(resolve => setTimeout(resolve, 1000));
           await message.reply(chunk);
         }
       } catch (error) {
         console.error(error);
-        message.reply('There was an error processing your request.');
+        await message.reply('Error processing your request.');
       }
     }
   } catch (error) {
@@ -122,12 +135,29 @@ client.on('messageCreate', async (message) => {
 });
 
 function splitResponse(response) {
-  const maxChunkLength = 2000;
-  let chunks = [];
-
-  for (let i = 0; i < response.length; i += maxChunkLength) {
-    chunks.push(response.substring(i, i + maxChunkLength));
+  const maxChunkLength = 1900; // Buffer for formatting
+  const chunks = [];
+  
+  // Split into sentences first
+  const sentences = response.match(/[^.!?]+[.!?]+/g) || [response];
+  
+  let currentChunk = '';
+  for (const sentence of sentences) {
+    // If adding this sentence exceeds limit, push current chunk and start new one
+    if (currentChunk.length + sentence.length > maxChunkLength) {
+      chunks.push(currentChunk.trim());
+      currentChunk = '';
+    }
+    currentChunk += sentence + ' ';
   }
-  return chunks;
+  
+  // Push remaining text
+  if (currentChunk.trim()) {
+    chunks.push(currentChunk.trim());
+  }
+  
+  // Add part indicators if multiple chunks
+  return chunks.map((chunk, index, array) => 
+    array.length > 1 ? `[Part ${index + 1}/${array.length}]\n${chunk}` : chunk
+  );
 }
-// Testing
