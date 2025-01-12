@@ -164,13 +164,20 @@ client.on('messageCreate', async (message) => {
         return;
       }
 
+      let typingInterval;
       try {
+        // Start continuous typing animation
+        typingInterval = setInterval(() => {
+          message.channel.sendTyping();
+        }, 5000); // Discord typing lasts ~10s, refresh every 5s
+
         // Check for image
         if (message.attachments.size > 0) {
           const imageData = await handleImage(message);
           if (imageData) {
             const prompt = message.content || "What's in this image?";
             const response = await runGeminiVision(prompt, imageData.buffer, imageData.mimeType, currentKeyIndex);
+            clearInterval(typingInterval);
             await message.reply(response);
             return;
           }
@@ -185,12 +192,14 @@ client.on('messageCreate', async (message) => {
         const response = await runGeminiPro(promptWithHistory, currentKeyIndex);
         updateMessageHistory(message.author.id, message.channel.id, 'assistant', response);
         
+        clearInterval(typingInterval);
         const chunks = splitResponse(response);
         for (const chunk of chunks) {
           await message.reply(chunk);
           await new Promise(resolve => setTimeout(resolve, 500)); // Brief pause between chunks
         }
       } catch (error) {
+        clearInterval(typingInterval);
         console.error(error);
         await message.reply('Error processing your request.');
       }
@@ -222,13 +231,20 @@ client.on('messageCreate', async (message) => {
         }
       }
 
+      let typingInterval;
       try {
+        // Start continuous typing animation
+        typingInterval = setInterval(() => {
+          message.channel.sendTyping();
+        }, 5000); // Discord typing lasts ~10s, refresh every 5s
+
         // Check for image
         const prompt = message.content.replace(`<@${client.user.id}>`, '').trim();
         if (message.attachments.size > 0) {
           const imageData = await handleImage(message);
           if (imageData) {
             const response = await runGeminiVision(prompt, imageData.buffer, imageData.mimeType, currentKeyIndex);
+            clearInterval(typingInterval);
             await message.reply(response);
             return;
           }
@@ -243,6 +259,7 @@ client.on('messageCreate', async (message) => {
         const result = await runGeminiPro(promptWithHistory, currentKeyIndex);
         updateMessageHistory(message.author.id, message.channel.id, "assistant", result);
         
+        clearInterval(typingInterval);
         const chunks = splitResponse(result);
         for (const chunk of chunks) {
           await message.channel.sendTyping();
@@ -250,6 +267,7 @@ client.on('messageCreate', async (message) => {
           await message.reply(chunk);
         }
       } catch (error) {
+        clearInterval(typingInterval);
         console.error(error);
         await message.reply('Error processing your request.');
       }
