@@ -1,206 +1,316 @@
+/**
+ * Hr-AI Discord Bot
+ * Features:
+ * - Gemini AI Integration with multi-API key support
+ * - Conversation history tracking
+ * - DM and Server channel support
+ * - Message chunking for long responses
+ * - Role-based access control
+ */
+
+// External dependencies
 require('dotenv').config();
 const { Client, GatewayIntentBits, Partials, ChannelType } = require('discord.js');
 const fs = require("fs");
 const path = require('path');
 const https = require('https');
 const { runGeminiPro, runGeminiVision, geminiApiKeys } = require('./gemini.js');
+const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
 
-let apiCallCount = 0; // keep track of how many times we've used the API
-let currentKeyIndex = 0; // keep track of which key we're using
+// API key rotation counters
+let apiCallCount = 0;     // Tracks total API calls for load balancing
+let currentKeyIndex = 0;  // Index of current API key in rotation
 
+/**
+ * Discord client configuration
+ * Sets up required permissions and partial structures for the bot
+ */
 const client = new Client({
   intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent,
-    GatewayIntentBits.DirectMessages,
-    GatewayIntentBits.GuildMembers // Ensure this intent is included
+    GatewayIntentBits.Guilds,         // Required for server interaction
+    GatewayIntentBits.GuildMessages,  // Read/send messages in servers
+    GatewayIntentBits.MessageContent, // View message content
+    GatewayIntentBits.DirectMessages, // Handle DM conversations
+    GatewayIntentBits.GuildMembers    // Access member permissions
   ],
   partials: [
-    Partials.Message,
-    Partials.Channel,
-    Partials.Reaction
+    Partials.Message,   // Handle message edits/deletes
+    Partials.Channel,   // Access DM channels
+    Partials.Reaction   // Handle message reactions
   ]
 });
 
+// Initialize bot connection
 client.login(process.env.DISCORD_TOKEN);
 
+// Bot startup confirmation
 client.on('ready', () => {
   console.log(`Logged in as ${client.user.tag}!`);
 });
 
-// Getting Authorize User from .ENV
-const allowedRole = process.env.ROLE
+/**
+ * Authorization Settings
+ * ROLE: Discord role ID required to use bot
+ * AUTHORIZED_USERS: Comma-separated list of user IDs
+ */
+const allowedRole = process.env.ROLE;
 const authorizedUsers = process.env.AUTHORIZED_USERS.split(',');
-// const authorizedChannels = process.env.AUTHORIZED_CHANNELS.split(',');
 
-client.on('messageCreate', async (message) => {
-  try {
-    if (message.author.bot) return;
+/**
+ * Message history tracking system
+ * @type {Map<string, Array>} - Stores conversation history
+ * Key format: channelId-userId
+ * Value: Array of message objects {role, parts}
+ */
+const messageHistory = new Map();
+const MAX_HISTORY = 5; // Maximum messages per conversation
 
-    // // Start typing indicator
-    // await message.channel.sendTyping();
+/**
+ * Updates conversation history for a user/channel pair
+ * @param {string} userId - Discord user's ID
+ * @param {string} channelId - Channel where message occurred 
+ * @param {string} role - Either 'user' or 'assistant'
+ * @param {string} parts - Message content
+ * @returns {Array} Updated conversation history
+ */
+function updateMessageHistory(userId, channelId, role, parts) {
+  const key = `${channelId}-${userId}`;
+  if (!messageHistory.has(key)) {
+    messageHistory.set(key, []);
+  }
+  
+  const history = messageHistory.get(key);
+  history.push({ role: role === 'assistant' ? 'model' : 'user', parts });
+  
+  // Maintain history size limit
+  if (history.length > MAX_HISTORY) {
+    history.shift();
+  }
+  
+  return history;
+}
 
-    // Direct Message Response
-    if (message.channel.type === ChannelType.DM && authorizedUsers.includes(message.author.id)) {
-      // Start typing indicator
-      await message.channel.sendTyping();
-      const prompt = message.content;
-      try {
-        const response = await runGeminiPro(prompt, currentKeyIndex);
-        apiCallCount++;
-        // If the API call count reaches 60, switch to the next key
-        if (apiCallCount >= 60) {
-          currentKeyIndex++;
-          apiCallCount = 0;
-          // If the current key index exceeds the length of the keys array, reset it to 0
-          if (currentKeyIndex >= geminiApiKeys.length) {
-            currentKeyIndex = 0;
-          }
-        }
-        const responseChunks = splitResponse(response);
-        for (const chunk of responseChunks) {
-          await message.reply(chunk);
-        }
-      } catch (error) {
-        console.error(error);
-        message.reply('there was an error trying to execute that command!');
+/**
+ * Validates user permissions based on role and channel access
+ * @param {object} message - Discord message object
+ * @returns {boolean} - True if user has permission, false otherwise
+ */
+function hasPermission(message) {
+  // 1. Super users always have access
+  if (authorizedUsers.includes(message.author.id)) {
+    return true;
+  }
+
+  // 2. DM Channel Check
+  if (message.channel.type === ChannelType.DM) {
+    return false; // Only authorized users can DM
+  }
+
+  // 3. Guild Channel Checks
+  if (message.channel.type === ChannelType.GuildText) {
+    // Channel restriction check
+    if (process.env.AUTHORIZED_CHANNELS) {
+      const authorizedChannels = process.env.AUTHORIZED_CHANNELS.split(',');
+      if (!authorizedChannels.includes(message.channel.id)) {
+        return false;
       }
     }
 
-    // Channel Response
-    if (message.channel.type === ChannelType.GuildText) {
-      if (!message.mentions.users.has(client.user.id)) return;
-      // Start typing indicator
-      await message.channel.sendTyping();
-      const userId = message.author.id;
-      const prompt = message.content;
-      let localPath = null;
-      let mimeType = null;
+    // Role check
+    const hasRole = message.member.roles.cache.some(role => 
+      role.name === process.env.ROLE || role.id === process.env.ROLE
+    );
 
-      // Check if the user has the allowed role
-      if (message.member) {
-        const roles = message.member.roles.cache.map(role => role.name);
-        // To Check what role user have.
-        // console.log(`User Roles: ${roles}`);
+    return hasRole;
+  }
 
-        const hasAllowedRole = message.member.roles.cache.some(role => role.name === allowedRole);
-        if (!hasAllowedRole) {
-          message.reply("You don't have the required role to use this command.");
-          return;
-        }
-      } else {
-        console.log('Message member not found.');
+  return false; // Default deny for unknown channel types
+}
+
+/**
+ * Handles image messages by downloading the image, processing it with Gemini Vision, and cleaning up.
+ * @param {object} message - Discord message object
+ * @returns {object|null} - Image data and mime type or null if no image found
+ */
+async function handleImage(message) {
+  const attachment = message.attachments.first();
+  if (!attachment) return null;
+
+  const response = await fetch(attachment.url);
+  const imageBuffer = await response.arrayBuffer();
+  return {
+    buffer: Buffer.from(imageBuffer),
+    mimeType: attachment.contentType || 'image/jpeg'
+  };
+}
+
+/**
+ * Main message event handler
+ * Processes: 
+ * - History commands
+ * - DM messages
+ * - Server channel messages
+ * Includes typing indicators and chunked responses
+ */
+client.on('messageCreate', async (message) => {
+  try {
+    // Ignore bot messages
+    if (message.author.bot) return;
+
+    // For DM channels - only allow authorized users
+    if (message.channel.type === ChannelType.DM) {
+      if (!authorizedUsers.includes(message.author.id)) {
+        await message.reply("⚠️ You are not authorized to use this bot in DMs.");
         return;
       }
 
-      // Vision model
-      if (message.attachments.size > 0) {
-        let attachment = message.attachments.first();
-        let url = attachment.url;
-        mimeType = attachment.contentType;
-        let filename = attachment.name;
+      let typingInterval;
+      try {
+        // Start continuous typing animation
+        typingInterval = setInterval(() => {
+          message.channel.sendTyping();
+        }, 5000); // Discord typing lasts ~10s, refresh every 5s
 
-        const supportedMimeTypes = ['image/png', 'image/jpeg', 'image/webp', 'image/heic', 'image/heif'];
-        if (!supportedMimeTypes.includes(mimeType)) {
-          console.log("Unsupported File Type: ", mimeType);
-          message.reply('Unsupported image format. Supported formats are PNG, JPEG, WEBP, HEIC, and HEIF.');
+        // Check for image
+        if (message.attachments.size > 0) {
+          const imageData = await handleImage(message);
+          if (imageData) {
+            const prompt = message.content || "What's in this image?";
+            const response = await runGeminiVision(prompt, imageData.buffer, imageData.mimeType, currentKeyIndex);
+            clearInterval(typingInterval);
+            await message.reply(response);
+            return;
+          }
+        }
+        // ...existing text handling...
+        const history = updateMessageHistory(message.author.id, message.channel.id, 'user', message.content);
+        const promptWithHistory = {
+          history: history,
+          current: message.content
+        };
+
+        const response = await runGeminiPro(promptWithHistory, currentKeyIndex);
+        updateMessageHistory(message.author.id, message.channel.id, 'assistant', response);
+        
+        clearInterval(typingInterval);
+        const chunks = splitResponse(response);
+        for (const chunk of chunks) {
+          await message.reply(chunk);
+          await new Promise(resolve => setTimeout(resolve, 500)); // Brief pause between chunks
+        }
+      } catch (error) {
+        clearInterval(typingInterval);
+        console.error(error);
+        await message.reply('Error processing your request.');
+      }
+    }
+
+    // For Guild Text channels
+    if (message.channel.type === ChannelType.GuildText) {
+      // Only respond to mentions
+      if (!message.mentions.users.has(client.user.id)) return;
+
+      // Check channel authorization
+      if (process.env.AUTHORIZED_CHANNELS) {
+        const authorizedChannels = process.env.AUTHORIZED_CHANNELS.split(',');
+        if (!authorizedChannels.includes(message.channel.id)) {
+          await message.reply("⚠️ Bot is not authorized in this channel.");
           return;
         }
+      }
 
-          // Define the path where the file will be saved
-        localPath = path.join(__dirname, 'image', filename);
-
-          // Ensure the directory exists
-        fs.mkdirSync(path.dirname(localPath), { recursive: true });
-
-          // Download the file
-        let file = fs.createWriteStream(localPath);
-        https.get(url, function (response) {
-          response.pipe(file);
-          file.on('finish', async function () {
-            file.close(async () => {
-                // close() is async, call runGeminiVision() here
-                // Get file stats
-              const stats = fs.statSync(localPath);
-                // Get file size in bytes
-              const fileSizeInBytes = stats.size;
-                // Check if file size exceeds limit
-              if (fileSizeInBytes > 3145728) {
-                  // File size exceeds limit, handle accordingly
-                message.reply('The provided image is too large. Please provide an image smaller than 4M');
-                fs.unlink(localPath, (err) => {
-                  if (err) console.error(err);
-                });
-              } else {
-                  // File size is within limit, proceed with runGeminiVision
-                try {
-                    // Get the Image Extension
-                    // console.log(mimeType)
-                  const result = await runGeminiVision(prompt, localPath, mimeType, currentKeyIndex);
-                  apiCallCount++;
-                    // If the API call count reaches 60, switch to the next key
-                  if (apiCallCount >= 60) {
-                    currentKeyIndex++;
-                    apiCallCount = 0;
-                      // If the current key index exceeds the length of the keys array, reset it to 0
-                    if (currentKeyIndex >= geminiApiKeys.length) {
-                      currentKeyIndex = 0;
-                    }
-                  }
-                  const responseChunks = splitResponse(result);
-                  for (const chunk of responseChunks) {
-                    await message.reply(chunk);
-                  }
-                } catch (error) {
-                  console.error(error);
-                  message.reply('there was an error trying to execute that command!');
-                } finally {
-                    // Delete the file after processing
-                  fs.unlink(localPath, (err) => {
-                    if (err) console.error(err);
-                  });
-                }
-              }
-            });
-          });
-        });
-      } else {
-        try {
-          const result = await runGeminiPro(prompt, currentKeyIndex);
-          apiCallCount++;
-            // If the API call count reaches 60, switch to the next key
-          if (apiCallCount >= 60) {
-            currentKeyIndex++;
-            apiCallCount = 0;
-              // If the current key index exceeds the length of the keys array, reset it to 0
-            if (currentKeyIndex >= geminiApiKeys.length) {
-              currentKeyIndex = 0;
-            }
-          }
-          const responseChunks = splitResponse(result);
-          for (const chunk of responseChunks) {
-            await message.reply(chunk);
-          }
-        } catch (error) {
-          console.error(error);
-          message.reply('there was an error trying to execute that command!');
+      // Check role authorization
+      if (!authorizedUsers.includes(message.author.id)) {
+        const hasRole = message.member?.roles.cache.some(role => 
+          role.name === process.env.ROLE || role.id === process.env.ROLE
+        );
+        
+        if (!hasRole) {
+          await message.reply(`⚠️ You need the ${process.env.ROLE} role to use this bot.`);
+          return;
         }
+      }
+
+      let typingInterval;
+      try {
+        // Start continuous typing animation
+        typingInterval = setInterval(() => {
+          message.channel.sendTyping();
+        }, 5000); // Discord typing lasts ~10s, refresh every 5s
+
+        // Check for image
+        const prompt = message.content.replace(`<@${client.user.id}>`, '').trim();
+        if (message.attachments.size > 0) {
+          const imageData = await handleImage(message);
+          if (imageData) {
+            const response = await runGeminiVision(prompt, imageData.buffer, imageData.mimeType, currentKeyIndex);
+            clearInterval(typingInterval);
+            await message.reply(response);
+            return;
+          }
+        }
+        // ...existing text handling...
+        const history = updateMessageHistory(message.author.id, message.channel.id, "user", prompt);
+        const promptWithHistory = {
+          history: history,
+          current: prompt
+        };
+
+        const result = await runGeminiPro(promptWithHistory, currentKeyIndex);
+        updateMessageHistory(message.author.id, message.channel.id, "assistant", result);
+        
+        clearInterval(typingInterval);
+        const chunks = splitResponse(result);
+        for (const chunk of chunks) {
+          await message.channel.sendTyping();
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          await message.reply(chunk);
+        }
+      } catch (error) {
+        clearInterval(typingInterval);
+        console.error(error);
+        await message.reply('Error processing your request.');
       }
     }
   } catch (error) {
-    console.error(error);
-    message.reply('there was an error trying to execute that command!');
+    console.error('Error:', error);
+    await message.reply('Sorry, there was an error processing your request.');
   }
 });
 
+/**
+ * Splits long responses into Discord-friendly chunks
+ * @param {string} response - Full AI response
+ * @returns {Array<string>} Array of message chunks
+ * Features:
+ * - Splits on sentence boundaries
+ * - Respects Discord's 2000 char limit
+ * - Adds part numbers for multi-chunk messages
+ */
 function splitResponse(response) {
-  const maxChunkLength = 2000;
-  let chunks = [];
-
-  for (let i = 0; i < response.length; i += maxChunkLength) {
-    chunks.push(response.substring(i, i + maxChunkLength));
+  const maxChunkLength = 1900; // Buffer for formatting
+  const chunks = [];
+  
+  // Split into sentences first
+  const sentences = response.match(/[^.!?]+[.!?]+/g) || [response];
+  
+  let currentChunk = '';
+  for (const sentence of sentences) {
+    // If adding this sentence exceeds limit, push current chunk and start new one
+    if (currentChunk.length + sentence.length > maxChunkLength) {
+      chunks.push(currentChunk.trim());
+      currentChunk = '';
+    }
+    currentChunk += sentence + ' ';
   }
-  return chunks;
+  
+  // Push remaining text
+  if (currentChunk.trim()) {
+    chunks.push(currentChunk.trim());
+  }
+  
+  // Add part indicators if multiple chunks
+  return chunks.map((chunk, index, array) => 
+    array.length > 1 ? `[Part ${index + 1}/${array.length}]\n${chunk}` : chunk
+  );
 }
-// Testing
