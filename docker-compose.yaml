@@ -8,5 +8,5 @@ services:
       - DISCORD_TOKEN=
       - GEMINI_API_KEYS=
       - ROLE=
-      # - AUTHORIZED_USERS=
-      # - AUTHORIZED_CHANNELS=
+      - AUTHORIZED_USERS=
+      - AUTHORIZED_CHANNELS=
