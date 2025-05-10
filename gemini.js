@@ -8,8 +8,8 @@ const geminiApiKeys = process.env.GEMINI_API_KEYS.split(',');
 async function runGeminiPro(prompt, index) {
   const genAI = new GoogleGenerativeAI(geminiApiKeys[index]);
   const model = genAI.getGenerativeModel({
-    model: "gemini-1.5-flash",
-    system_instruction: "You are Hr AI, a helpful Discord bot developed by Harsh Raj. You have access to chat history and should use it to provide contextual responses."
+    model: "gemini-2.0-flash-lite",
+    system_instruction: "You are Hr AI, a helpful Discord bot made by Harsh Raj. You have access to chat history and should use it to provide contextual responses."
   });
 
   // Start chat
@@ -53,7 +53,7 @@ function fileToGenerativePart(path, mimeType) {
 // For text and image input, use the gemini-pro-vision model
 async function runGeminiVision(prompt, imageData, mimeType, index) {
   const genAI = new GoogleGenerativeAI(geminiApiKeys[index]);
-  const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
+  const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
   const imagePart = {
     inlineData: {
